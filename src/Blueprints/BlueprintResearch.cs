@@ -11,6 +11,32 @@ namespace SharableBlueprints
     public static class BlueprintResearch
     {
         static readonly Dictionary<string, List<string>> Unlocks = LoadUnlocks();
+        static bool catalogDriftChecked;
+
+        /// <summary>Verifies that embedded unlock entries match installed game items and research nodes.</summary>
+        public static bool ValidateUnlockCatalog(out List<string> warnings)
+        {
+            warnings = new List<string>();
+            var techIds = new HashSet<string>(FoundationApi.ResearchAccess.Nodes.Select(t => t.Identifier), StringComparer.Ordinal);
+            var itemIds = new HashSet<string>(FoundationApi.ItemAccess.Items.Select(i => i.Identifier), StringComparer.Ordinal);
+            foreach (var entry in Unlocks)
+            {
+                if (entry.Key.StartsWith("item/", StringComparison.Ordinal))
+                {
+                    string itemId = entry.Key.Substring(5);
+                    if (!itemIds.Contains(itemId))
+                        warnings.Add("Missing catalog item for unlock entry: " + itemId);
+                }
+
+                foreach (string reqTech in entry.Value)
+                {
+                    if (!techIds.Contains(reqTech))
+                        warnings.Add("Missing research node '" + reqTech + "' for " + entry.Key);
+                }
+            }
+            return warnings.Count == 0;
+        }
+
         public static BlueprintResearchReport Check(PortableBlueprint blueprint)
         {
             var report = new BlueprintResearchReport();
@@ -19,6 +45,13 @@ namespace SharableBlueprints
             {
                 report.Add("no-kingdom", "Load a kingdom", "Open a kingdom before placing a blueprint.", blueprint.Name);
                 return report;
+            }
+
+            if (!catalogDriftChecked)
+            {
+                catalogDriftChecked = true;
+                if (!ValidateUnlockCatalog(out var driftWarnings))
+                    BepInEx.Logging.Logger.CreateLogSource("SharableBlueprints").LogWarning("Research unlock table drift detected (" + driftWarnings.Count + "): " + string.Join("; ", driftWarnings.Take(3)));
             }
 
             var tech = FoundationApi.ResearchAccess.Nodes.ToDictionary(t => t.Identifier, StringComparer.Ordinal);
@@ -138,7 +171,7 @@ namespace SharableBlueprints
                         report.Add("upgrade/" + type + "/" + upgrade, "Unlock " + (upgrade ?? "unknown upgrade") + " for " + subject, "This upgrade is not available for this building in the current kingdom. Its upgrade research must be unlocked before placement.", subject);
                 }
 
-                foreach (var reference in PortableBlueprint.References(data))
+                foreach (var reference in PortableBlueprint.References(data).Concat(BlueprintResearchApi.ExtractCustomReferences(type, data)))
                 {
                     string id = reference.value.Split(':')[0];
                     if (reference.key == "Recipe")

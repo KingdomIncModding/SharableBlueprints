@@ -10,7 +10,7 @@ using System.Collections.Generic;
 namespace SharableBlueprints
 {
     [BepInPlugin(Id, "Sharable Blueprints", Version)]
-    [BepInDependency("urakka.kingdominc.foundation", "0.14.0")]
+    [BepInDependency("urakka.kingdominc.foundation", "0.14.4")]
     public sealed class SharableBlueprintsPlugin : BaseUnityPlugin
     {
         void Attach(Component ui)
@@ -21,7 +21,7 @@ namespace SharableBlueprints
             var originalArea = FoundationApi.UiAccess.WorldOverlayTemplate;
             toolbarButton = Instantiate(original, bar, false);
             toolbarButton.name = "SharableBlueprintsButton";
-            var image = toolbarButton.transform.Find("Image")?.GetComponent<Image>();
+            var image = FoundationApi.UiAccess.ToolbarButtonIcon(toolbarButton);
             if (!image)
                 throw new MissingMemberException("The native toolbar icon was not found.");
             image.sprite = icon;
@@ -29,10 +29,8 @@ namespace SharableBlueprints
             image.preserveAspect = true;
             image.color = Color.white;
             FoundationApi.UiAccess.RemoveNativeKeyBindingTooltip(toolbarButton);
-            var tutorial = toolbarButton.transform.Find("TutorialArrow");
-            if (tutorial)
-                Destroy(tutorial.gameObject);
-            activeBorder = toolbarButton.transform.Find("Active")?.gameObject;
+            FoundationApi.UiAccess.RemoveNativeToolbarTutorial(toolbarButton);
+            activeBorder = FoundationApi.UiAccess.ToolbarButtonActiveIndicator(toolbarButton);
             if (activeBorder)
                 activeBorder.SetActive(false);
             FoundationApi.UiAccess.RemoveNativeTooltips(toolbarButton);
@@ -93,7 +91,7 @@ namespace SharableBlueprints
             attachedUi = null;
         }
 
-        public const string Id = "urakka.kingdominc.sharableblueprints", Version = "0.5.3";
+        public const string Id = "urakka.kingdominc.sharableblueprints", Version = "0.5.4";
         readonly List<IDisposable> patches = new List<IDisposable>();
         bool placementHooksReady;
         Component attachedUi;
@@ -147,6 +145,10 @@ namespace SharableBlueprints
                 icon = Sprite.Create(iconTexture, new Rect(0, 0, iconTexture.width, iconTexture.height), new Vector2(.5f, .5f), 100);
             }
 
+            if (!BlueprintResearch.ValidateUnlockCatalog(out var researchWarnings))
+                foreach (var warning in researchWarnings)
+                    Logger.LogWarning(warning);
+
             Logger.LogInfo("Sharable Blueprints ready. Area exports: " + ExportDirectory);
         }
 
@@ -164,14 +166,6 @@ namespace SharableBlueprints
                 Logger.LogWarning("Blueprint export: " + error);
                 Notify(error is InvalidOperationException ? error.Message : "Blueprint could not be saved. Check the BepInEx log.");
             }
-        }
-
-        [Obsolete("Compatibility helper last used with game build 1.0.14; remove in the next Sharable Blueprints release.")]
-        static T Field<T>(object source, string name)
-            where T : class
-        {
-            object value = name == "_cloneMenuButton" ? (object)FoundationApi.UiAccess.CloneButtonTemplate : name == "_editHotbar" ? FoundationApi.UiAccess.EditToolbar : name == "_cloneGhost" ? FoundationApi.UiAccess.WorldOverlayTemplate : null;
-            return value as T ?? throw new MissingFieldException("Unsupported legacy UI template: " + name);
         }
 
         internal void LogLibraryError(Exception error) => Logger.LogWarning("Blueprint library: " + error);

@@ -49,6 +49,7 @@ namespace SharableBlueprints
             if (!elements.IsJsonArray || elements.AsJsonArray.Count == 0 || !pipes.IsJsonArray || !decos.IsJsonArray)
                 throw new InvalidDataException("The blueprint must contain buildings, pipes and decorations lists.");
             var nodes = new Dictionary<string, JsonValue>(StringComparer.Ordinal);
+            var occupiedPositions = new HashSet<(long x, long y)>();
             int buildings = 0;
             foreach (var element in elements.AsJsonArray)
             {
@@ -56,7 +57,10 @@ namespace SharableBlueprints
                 if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(type) || nodes.ContainsKey(id))
                     throw new InvalidDataException("A blueprint building has a missing or repeated identifier/type.");
                 nodes.Add(id, element);
-                Point(Field(element, "Position"));
+                var pos = Field(element, "Position");
+                Point(pos);
+                if (!occupiedPositions.Add((pos[0].AsInteger, pos[1].AsInteger)))
+                    throw new InvalidDataException("Two blueprint buildings occupy the same position.");
                 if (!Field(element, "Inputs").IsJsonArray || !Field(element, "Outputs").IsJsonArray)
                     throw new InvalidDataException("A building's connection ports are missing.");
                 var stack = Field(element, "StackSize");
@@ -107,11 +111,20 @@ namespace SharableBlueprints
                 throw new InvalidDataException("Invalid blueprint coordinates.");
         }
 
+        private static readonly HashSet<string> NativeReferenceKeys = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Recipe",
+            "Resource",
+            "SelectedResource",
+            "FilterType",
+            "OutputType"
+        };
+
         public static IEnumerable<(string key, string value)> References(JsonValue data, string key = "")
         {
             if (data.IsString)
             {
-                if (key != "Guid" && key != "ElementType" && key != "IconName" && key != "Label" && !string.IsNullOrEmpty(data.AsString))
+                if (NativeReferenceKeys.Contains(key) && !string.IsNullOrEmpty(data.AsString))
                     yield return (key, data.AsString);
             }
             else if (data.IsJsonObject)

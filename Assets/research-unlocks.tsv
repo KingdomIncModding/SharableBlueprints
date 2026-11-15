@@ -1,4 +1,6 @@
 # Derived from installed Kingdom .inc tech definitions; regenerate after game updates.
+# baseline-game=Release v1.0.14
+# baseline-entries=50
 item	adventurer	adventurers_guild
 item	ancient_wood_log	forest_ancient_wood
 item	bird_egg	forest_bird_egg

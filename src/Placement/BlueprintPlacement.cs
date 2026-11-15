@@ -55,6 +55,8 @@ namespace SharableBlueprints
 
         public bool CheckBeforeCommit(Component root)
         {
+            if (committed)
+                return false;
             try
             {
                 if (player != FoundationApi.Kingdom || !FoundationApi.UiAccess.IsWorkspaceVisible || destination != FoundationApi.Kingdom.ActiveWorkspace)
@@ -71,7 +73,8 @@ namespace SharableBlueprints
                     return false;
                 }
 
-                if (!player.CanAfford(Cost()))
+                var totalCost = Cost();
+                if (!player.CanAfford(totalCost))
                 {
                     FoundationApi.WorkspaceAccess.StopBlueprintMode();
                     FoundationApi.UiAccess.ShowInsufficientFunds();
@@ -79,6 +82,7 @@ namespace SharableBlueprints
                 }
 
                 var rootRect = (RectTransform)root.transform;
+                var placedBoxes = new List<(int left, int right, int bottom, int top)>();
                 foreach (var ghost in FoundationApi.Blueprints.Children(root))
                 {
                     var element = FoundationApi.Blueprints.Building(ghost);
@@ -88,22 +92,115 @@ namespace SharableBlueprints
                     Vector2 position = rect.anchoredPosition;
                     if (ghost != root)
                         position += rootRect.anchoredPosition - new Vector2(0, rootRect.sizeDelta.y);
-                    if (FoundationApi.Blueprints.Overlaps(new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.y)), new Vector2Int(Mathf.RoundToInt(rect.sizeDelta.x), Mathf.RoundToInt(rect.sizeDelta.y))))
+                    int x = Mathf.RoundToInt(position.x), y = Mathf.RoundToInt(position.y);
+                    int w = Mathf.RoundToInt(rect.sizeDelta.x), h = Mathf.RoundToInt(rect.sizeDelta.y);
+                    if (FoundationApi.Blueprints.Overlaps(new Vector2Int(x, y), new Vector2Int(w, h)))
                     {
                         Stop("Not enough space for the whole blueprint. No buildings were placed.");
                         return false;
                     }
 
+                    int left = x, right = x + w, bottom = y - h, top = y;
+                    foreach (var existing in placedBoxes)
+                    {
+                        if (left < existing.right && existing.left < right && bottom < existing.top && existing.bottom < top)
+                        {
+                            Stop("Buildings in this blueprint overlap each other. No buildings were placed.");
+                            return false;
+                        }
+                    }
+
+                    placedBoxes.Add((left, right, bottom, top));
                     FoundationApi.Blueprints.SetCollision(ghost, false);
                 }
 
-                return true;
+                CommitAtomically(rootRect, totalCost);
+                return false;
             }
             catch (Exception error)
             {
                 owner.LogLibraryError(error);
-                Stop("Blueprint could not be placed. No placement was started.");
+                Stop("Blueprint could not be placed. No changes were kept.");
                 return false;
+            }
+        }
+
+        void CommitAtomically(RectTransform rootRect, GameMoney totalCost)
+        {
+            if (source.Buildings.Count == 0)
+                throw new InvalidOperationException("Blueprint has no buildings to place.");
+
+            var rootPos = new Vector2Int(Mathf.RoundToInt(rootRect.anchoredPosition.x), Mathf.RoundToInt(rootRect.anchoredPosition.y));
+            var delta = rootPos - source.Buildings[0].Position;
+            if (!FoundationApi.WorkspaceAccess.TrySpend(totalCost))
+            {
+                FoundationApi.WorkspaceAccess.StopBlueprintMode();
+                FoundationApi.UiAccess.ShowInsufficientFunds();
+                return;
+            }
+
+            var rollback = new Stack<Action>();
+            rollback.Push(() => FoundationApi.WorkspaceAccess.Grant(totalCost, false));
+            try
+            {
+                var placed = new Dictionary<WorkspaceObject, WorkspaceObject>();
+                foreach (var element in source.Buildings)
+                {
+                    var copy = FoundationApi.WorkspaceAccess.Copy(element);
+                    copy.SetPosition(element.Position + delta);
+                    FoundationApi.WorkspaceAccess.PlaceBuilding(copy);
+                    rollback.Push(() =>
+                    {
+                        if (FoundationApi.WorkspaceAccess.IsInActiveWorkspace(copy))
+                            FoundationApi.WorkspaceAccess.Remove(copy);
+                    });
+                    placed.Add(element, copy);
+                }
+
+                foreach (var deco in source.Decorations)
+                {
+                    var copy = FoundationApi.WorkspaceAccess.Copy(deco);
+                    copy.Locked = deco.Locked;
+                    copy.SetPosition(deco.Position + delta);
+                    FoundationApi.WorkspaceAccess.PlaceDecoration(copy);
+                    rollback.Push(() =>
+                    {
+                        if (FoundationApi.WorkspaceAccess.IsInActiveWorkspace(copy))
+                            FoundationApi.WorkspaceAccess.Remove(copy);
+                    });
+                }
+
+                foreach (var pipe in source.Pipes)
+                {
+                    var outPort = pipe.ConnectedOutput;
+                    var inPort = pipe.ConnectedInput;
+                    if (outPort == null || inPort == null ||
+                        !placed.TryGetValue(outPort.Parent, out var outBuilding) ||
+                        !placed.TryGetValue(inPort.Parent, out var inBuilding) ||
+                        outPort.ParentIndex < 0 || outPort.ParentIndex >= outBuilding.Outputs.Count ||
+                        inPort.ParentIndex < 0 || inPort.ParentIndex >= inBuilding.Inputs.Count)
+                        throw new InvalidOperationException("Blueprint contains an invalid or incomplete pipe connection.");
+
+                    var newPipe = FoundationApi.WorkspaceAccess.CreatePipe();
+                    newPipe.Connect(outBuilding.Outputs[outPort.ParentIndex], inBuilding.Inputs[inPort.ParentIndex]);
+                    if (pipe.Nodes.Count > 0)
+                        newPipe.SetNodes(pipe.Nodes.Select(node => node + delta));
+                    FoundationApi.WorkspaceAccess.PlacePipe(newPipe);
+                    rollback.Push(() => FoundationApi.WorkspaceAccess.RemovePipe(newPipe));
+                }
+
+                committed = true;
+                FoundationApi.WorkspaceAccess.StopBlueprintMode();
+            }
+            catch
+            {
+                while (rollback.Count > 0)
+                {
+                    try { rollback.Pop()(); }
+                    catch { }
+                }
+
+                throw;
             }
         }
 
@@ -128,6 +225,7 @@ namespace SharableBlueprints
         GameWorkspace source, destination;
         GameKingdom player;
         string entryId;
+        bool committed;
         public static void CancelOwned(SharableBlueprintsPlugin owner)
         {
             var manager = FoundationApi.WorkspaceAccess.Root;
