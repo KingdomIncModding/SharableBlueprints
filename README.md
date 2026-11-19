@@ -1,5 +1,7 @@
 # Sharable Blueprints
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/S6V62AX30M)
+
 **Current release: 0.5.4 — for Kingdom Inc game version 1.0.14.**
 
 [GitHub releases](https://github.com/KingdomIncModding/SharableBlueprints/releases) · [Nexus Mods](https://www.nexusmods.com/kingdominc/mods/6) · Version 0.5.4
@@ -46,3 +48,9 @@ Close the game and delete `BepInEx/plugins/SharableBlueprints/`. Your saved blue
 ## Credits and Source
 
 Created by **Urakka** (rockyamyx). [Source code on GitHub](https://github.com/KingdomIncModding/SharableBlueprints). The schematic icon and thumbnail are original generated artwork.
+
+## Support
+
+If you enjoy these Kingdom Inc mods and tools, consider supporting development on Ko-fi!
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/S6V62AX30M)
